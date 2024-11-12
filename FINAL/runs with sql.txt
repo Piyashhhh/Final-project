@@ -1,0 +1,83 @@
+import pandas as pd
+import numpy as np
+import time
+import psycopg2
+import pickle
+
+# Load your dataset and model
+xlsv_path = r"C:\Users\Admin\Desktop\newwwwww\cow data accurate.xlsx"
+data = pd.read_excel(xlsv_path)
+model_path = r"C:\Users\Admin\Desktop\newwwwww\stress_level_model.pkl"
+
+# Load your trained model if needed for calculating stress
+with open(model_path, "rb") as file:
+    model = pickle.load(file)
+
+# Define weight factors for each metric in the stress calculation
+weight_factors = {
+    'Heart Rate': 0.3,
+    'Body Temp': 0.25,
+    'Activity Level': 0.2,
+    'Eating Behavior': 0.1,
+    'Vocalizations': 0.1,
+    'Environmental Temp': 0.05
+}
+
+# Fluctuation function to simulate real-time integer changes
+def fluctuate_data(data):
+    fluctuated_data = data.copy()
+    for index, row in fluctuated_data.iterrows():
+        # Apply integer-only fluctuations using rounding
+        fluctuated_data.loc[index, 'Heart Rate'] = int(round(row['Heart Rate'] * np.random.uniform(0.95, 1.05)))
+        fluctuated_data.loc[index, 'Body Temp'] = int(round(row['Body Temp'] * np.random.uniform(0.98, 1.02)))
+        fluctuated_data.loc[index, 'Activity Level'] = int(round(row['Activity Level'] * np.random.uniform(0.9, 1.1)))
+        fluctuated_data.loc[index, 'Eating Behavior'] = int(round(row['Eating Behavior'] * np.random.uniform(0.9, 1.1)))
+        fluctuated_data.loc[index, 'Vocalizations'] = int(round(row['Vocalizations'] * np.random.uniform(0.95, 1.05)))
+        fluctuated_data.loc[index, 'Environmental Temp'] = int(round(row['Environmental Temp'] * np.random.uniform(0.98, 1.02)))
+
+        # Calculate new stress level using weighted sum
+        weighted_sum = sum(fluctuated_data.loc[index, metric] * weight for metric, weight in weight_factors.items())
+        threshold = 50  # Set an appropriate threshold based on your data
+        fluctuated_data.loc[index, 'Stress Level'] = 1 if weighted_sum > threshold else 0
+
+    return fluctuated_data
+
+# Function to insert data into PostgreSQL
+def insert_data_into_postgres(data, db_params):
+    # Connect to PostgreSQL database
+    conn = psycopg2.connect(**db_params)
+    cursor = conn.cursor()
+
+    query = """
+        INSERT INTO "CowMetrics" ("Cow ID", "HeartRate", "BodyTemp", "ActivityLevel", 
+                                  "EatingBehavior", "Vocalizations", "EnvironmentalTemp", 
+                                  "FeedingTime", "LyingTime", "StandingTime", "StressLevel")
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+    """
+
+    for _, row in data.iterrows():
+        cursor.execute(query, (
+            row['Cow ID'], row['Heart Rate'], row['Body Temp'], row['Activity Level'],
+            row['Eating Behavior'], row['Vocalizations'], row['Environmental Temp'],
+            row['Feeding Time'], row['Lying Time'], row['Standing Time'], row['Stress Level']
+        ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+# Database connection parameters
+db_params = {
+    'dbname': 'CattleMetrics',
+    'user': 'postgres',
+    'password': 'admin',
+    'host': 'localhost',
+    'port': 5432
+}
+
+# Run the fluctuation and export loop
+while True:
+    fluctuated_data = fluctuate_data(data)
+    insert_data_into_postgres(fluctuated_data, db_params)  # Insert data into PostgreSQL
+    print("Data updated in PostgreSQL at", time.ctime())
+    time.sleep(60)  # Wait for 60 seconds before the next fluctuation
